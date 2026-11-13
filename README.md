@@ -1,4 +1,4 @@
-# Email-and-URL-Threat-Analysis
+# Email and URL Threat Analysis
 A simple Python email and url threat analysis tool. 
 
 Navigate to containing directory in terminal and run:
