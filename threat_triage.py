@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline email and URL risk triage. Uses only Python's standard library."""
+"""Offline email and URL risk triage with look-alike domain detection."""
 
 import argparse
 import ipaddress
@@ -23,11 +23,54 @@ URGENCY_TERMS = (
     "wire transfer", "gift card", "act now",
 )
 
+# Common high-value targets for typosquatting
+TARGET_DOMAINS = {
+    "google.com", "microsoft.com", "apple.com", "amazon.com", 
+    "paypal.com", "facebook.com", "netflix.com", "icloud.com", 
+    "outlook.com", "yahoo.com", " chase.com", "bankofamerica.com"
+}
+
+def levenshtein_distance(s1, s2):
+    """Calculates the edit distance between two strings."""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if not s2:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+def check_lookalike(host):
+    """Checks if the host is a look-alike of a target domain."""
+    findings = []
+    
+    for target in TARGET_DOMAINS:
+        # 1. Direct Edit Distance (Typosquatting)
+        # distance of 1 or 2 is highly suspicious for a domain of this length
+        dist = levenshtein_distance(host, target)
+        if 0 < dist <= 2:
+            findings.append(f"Possible typosquatting: looks like {target} (dist: {dist})")
+            break
+        
+        # 2. Subdomain Deception
+        # Flags 'google.com.secure-login.net' because 'google.com' is used as a prefix
+        if target in host and host != target:
+            findings.append(f"Subdomain deception: target '{target}' found within {host}")
+            break
+            
+    return findings
 
 def add(findings, message):
     if message not in findings:
         findings.append(message)
-
 
 def analyze_url(raw_url):
     findings = []
@@ -39,6 +82,10 @@ def analyze_url(raw_url):
             return candidate, ["Could not identify a hostname."]
 
         host = host.rstrip(".").lower()
+
+        # Check for look-alikes
+        lookalike_findings = check_lookalike(host)
+        findings.extend(lookalike_findings)
 
         if parts.scheme.lower() != "https":
             add(findings, "Does not use HTTPS.")
@@ -72,11 +119,9 @@ def analyze_url(raw_url):
     except ValueError:
         return candidate, ["Could not parse this URL."]
 
-
 def email_domain(address):
     match = re.search(r"@([^>\s]+)", address or "")
     return match.group(1).strip().lower().rstrip(".") if match else None
-
 
 def analyze_email(text):
     findings = []
@@ -112,7 +157,6 @@ def analyze_email(text):
 
     return message, findings, urls
 
-
 def print_findings(title, findings):
     print(title)
     if findings:
@@ -120,7 +164,6 @@ def print_findings(title, findings):
             print(f"  - {finding}")
     else:
         print("  - No obvious warning signs found by these checks.")
-
 
 def main():
     parser = argparse.ArgumentParser(description="Offline email and URL threat triage")
@@ -159,7 +202,6 @@ def main():
                     print("    - No obvious warning signs found by these checks.")
         else:
             print("\nNo HTTP or HTTPS URLs found.")
-
 
 if __name__ == "__main__":
     main()
